@@ -1,3 +1,5 @@
+/*Will Cheney Tag Display*/
+
 
 #include <DW1000.h>
 #include <DW1000CompileOptions.h>
@@ -7,7 +9,7 @@
 #include <DW1000Ranging.h>
 #include <DW1000Time.h>
 #include <require_cpp11.h>
-/*Will Cheney Tag Display*/
+
 
 
 #include <WiFi.h>
@@ -42,6 +44,8 @@
 //Tag MAC Address Variable
 char TAG_ADDR[18];
 
+
+//Define Pins on Makerfabs PCB
 //Define Pins for SPI and I2C
 #define SPI_SCK 18
 #define SPI_MISO 19
@@ -54,23 +58,13 @@ char TAG_ADDR[18];
 #define I2C_SDA 4
 #define I2C_SCL 5
 
-
 #define cs_pin 10
-
-
-#define DEVICE (0x53)
-#define TO_READ (6)
-
-byte buff[TO_READ];
-char str[512];
-int regAddress = 0x32;
-int x,y,z;
-double roll = 0.00, pitch = 0.00;
 
 //// Heartrate defines
 //const int SensorPin = 12;
 //DFRobot_Heartrate heartrate(DIGITAL_MODE);
 
+//Variables for UWB Distance 
 struct Link
 {
     uint16_t anchor_addr;
@@ -81,10 +75,14 @@ struct Link
  
 struct Link *uwb_data;
 
+
+
 //Assign Display Screen
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
-//Assign unique IDs to each sensor
+//Assign unique IDs to each Accelerometer
+//0x53 for SDO connected to ground
+//0x1D for SDO connected to VCC
 Adafruit_ADXL345_Unified accel1 = Adafruit_ADXL345_Unified(0x53); // Sensor with address 0x53
 Adafruit_ADXL345_Unified accel2 = Adafruit_ADXL345_Unified(0x1D); // Sensor with address 0x1D
 
@@ -119,6 +117,9 @@ float deltaX2;
 float deltaY2;
 float deltaZ2;
 
+int count1 = 0; // Counter for sensor 1 events
+int count2 = 0; // Counter for sensor 2 events
+
 //Delay Replacement
 unsigned long previousMillis = 0;
 const unsigned long interval = 1000; // Interval in milliseconds
@@ -127,6 +128,14 @@ WiFiClient espClient;
 PubSubClient client(espClient);
 
 //topics
+
+const char* T_Event1_X = "ADXL1/Event1_X";
+const char* T_Event1_Y = "ADXL1/Event1_Y";
+const char* T_Event1_Z = "ADXL1/Event1_Z";
+
+const char* T_Event2_X = "ADXL2/Event2_X";
+const char* T_Event2_Y = "ADXL2/Event2_Y";
+const char* T_Event2_Z = "ADXL2/Event2_Z";
 
 const char* T_Fall_Detected = "Fall_Detected";
 const char* T_FD_Tag_MAC_Address = "Fall_Detected/Tag_MAC_Address";
@@ -155,7 +164,7 @@ int RandomOrientationID;
 float DistanceValue;
 String Distance;
 String AnchorMAC1;
-
+long int runtime = 0;
 
 void setup()
 {
@@ -165,113 +174,26 @@ void setup()
     Serial.begin(115200);
     //Serial.begin(9600);
     
-    
- 
     MAC_Address();
-    delay(1000);
-
-    // Make sure both Accelerometers are connected
-    if (!accel1.begin() || !accel2.begin()) 
-    {
-      Serial.println("Ooops, no ADXL345 detected!");
-      while (1);
-    }
-
-    //Set Accelerometer Sensitivity
-    accel1.setRange(ADXL345_RANGE_16_G);
-    accel2.setRange(ADXL345_RANGE_16_G);
-
-     
-    // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
-    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
-    { // Address 0x3C for 128x32
-        Serial.println(F("SSD1306 allocation failed"));
-        for (;;)
-            ; // Don't proceed, loop forever
-    }
-    display.clearDisplay();
-
-    logoshow();
-
-    // init the configuration
-    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
-    DW1000Ranging.initCommunication(UWB_RST, UWB_SS, UWB_IRQ); // Reset, CS, IRQ pin
-    // define the sketch as anchor. It will be great to dynamically change the type of module
-    DW1000Ranging.attachNewRange(newRange);
-    DW1000Ranging.attachNewDevice(newDevice);
-    DW1000Ranging.attachInactiveDevice(inactiveDevice);
-    // Enable the filter to smooth the distance
-    //DW1000Ranging.useRangeFilter(false);
-
-    // we start the module as a tag
-    DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_RANGE_LOWPOWER);
-    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_SHORTDATA_FAST_LOWPOWER);
-    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_FAST_LOWPOWER);
-    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_SHORTDATA_FAST_ACCURACY);
-    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_FAST_ACCURACY);
-    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_RANGE_ACCURACY);
-
-
     
-    uwb_data = init_link();
+    Accelerometer_Start();
+    Display_Start();
+    logoshow();
+    UWB_Initialise();
 
     Wifi_Connect();
-    MQTT_Connect();
-   
-
-    
+    MQTT_Connect();     
 }
 
-long int runtime = 0;
+
 
 void loop()
-{
-
-
-  
-  /*heartrate loop
-  int rateValue;
-  heartrate.getValue(SensorPin);
-  rateValue = heartrate.getRate();
-  if(rateValue){
-    Serial.println(rateValue);
-  }*/
-
-  readFrom(DEVICE, regAddress, TO_READ, buff); //read the acceleration data from the ADXL345
-                                              //each axis reading comes in 10 bit resolution, ie 2 bytes.  Least Significat Byte first!!
-                                              //thus we are converting both bytes in to one int
-  x = (((int)buff[1]) << 8) | buff[0];
-  y = (((int)buff[3])<< 8) | buff[2];
-  z = (((int)buff[5]) << 8) | buff[4];
-
-  //we send the x y z values as a string to the serial port
-  Serial.print("The acceleration info of x, y, z are:");
-  sprintf(str, "%d %d %d", x, y, z);
-  Serial.print(str);
-  Serial.write(10);
-  //Roll & Pitch calculate
-  RP_calculate();
-  Serial.print("Roll:"); Serial.println( roll );
-  Serial.print("Pitch:"); Serial.println( pitch );
-  Serial.println("");
-  //It appears that delay is needed in order not to clog the port
-  delay(50);
-  
-   DW1000Ranging.loop();
-    if ((millis() - runtime) > 1000)
-    {
-        display_uwb(uwb_data);
-        runtime = millis();
-    }
+{ 
+    DW1000Ranging.loop();
+    DW1000_Timer()
     Fall_Sampler();
-
-    HR_Sampler();
-
-    
-   // delay(200);
+    HR_Sampler();  
 }
-
-
 
 void newRange()
 {
@@ -555,7 +477,7 @@ void Fall_Sampler()
   unsigned long currentMillis = millis();
 
   // Check if it's time to read accelerometer data
-  if (currentMillis - previousMillis >= interval)
+  if (currentMillis - previousMillis >= interval * 2)
   {
     previousMillis = currentMillis;
 
@@ -568,15 +490,33 @@ void Fall_Sampler()
     accel2.getEvent(&event2);
 
     //Print X,Y,Z values
-    Serial.print("1 X: "); Serial.print(event1.acceleration.x); Serial.print("  ");
-    Serial.print("1 Y: "); Serial.print(event1.acceleration.y); Serial.print("  ");
-    Serial.print("1 Z: "); Serial.print(event1.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
-    Serial.print("2 X: "); Serial.print(event2.acceleration.x); Serial.print("  ");
-    Serial.print("2 Y: "); Serial.print(event2.acceleration.y); Serial.print("  ");
-    Serial.print("2 Z: "); Serial.print(event2.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
-
+    count1++;
+    Serial.print("Event Count: ");
+    Serial.print(count1);
+    Serial.print(" X: "); Serial.print(event1.acceleration.x); Serial.print("  ");
+    Serial.print("Y: "); Serial.print(event1.acceleration.y); Serial.print("  ");
+    Serial.print("Z: "); Serial.print(event1.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
+    count2++;
+    Serial.print("Event Count: ");
+    Serial.print(count2);
+    Serial.print(" X: "); Serial.print(event2.acceleration.x); Serial.print("  ");
+    Serial.print("Y: "); Serial.print(event2.acceleration.y); Serial.print("  ");
+    Serial.print("Z: "); Serial.print(event2.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
   
-    //Calculate the difference in accelerometer values
+    String event1x = String(event1.acceleration.x);
+    client.publish(T_Event1_X, event1x.c_str());
+    String event1y = String(event1.acceleration.y);
+    client.publish(T_Event1_Y, event1y.c_str());
+    String event1z = String(event1.acceleration.z);
+    client.publish(T_Event1_Z, event1z.c_str());
+  
+    String event2x = String(event2.acceleration.x);
+    client.publish(T_Event2_X, event2x.c_str());
+    String event2y = String(event2.acceleration.y);
+    client.publish(T_Event2_Y, event2y.c_str());
+    String event2z = String(event2.acceleration.z);
+    client.publish(T_Event2_Z, event2z.c_str());
+    /*Calculate the difference in accelerometer values
     deltaX1 = event1.acceleration.x - prevEvent1.acceleration.x;
     deltaY1 = event1.acceleration.y - prevEvent1.acceleration.y;
     deltaZ1 = event1.acceleration.z - prevEvent1.acceleration.z;
@@ -597,7 +537,7 @@ void Fall_Sampler()
     if (abs(deltaX2) > threshold2 || abs(deltaY2) > threshold2 || abs(deltaZ2) > threshold2) 
     {
       Serial.println("Sensor 2 - Activity detected!");
-    }
+    }*/
   }
 }
 
@@ -615,9 +555,13 @@ void Fall_Detected()
 
 void HR_Sampler()
 {
-  RandomHR = random(1024);
-  RandomMotionID = random(10);
-  HR_Threshold();
+  /*heartrate loop
+  int rateValue;
+  heartrate.getValue(SensorPin);
+  rateValue = heartrate.getRate();
+  if(rateValue){
+    Serial.println(rateValue);
+  }*/
 }
 
 
@@ -635,15 +579,17 @@ void HR_Threshold()
 void MQTT_upload()
 {
   //called by Fall_detected()
-  //call NewRange() which gets the address of the anchor and the distance to said anchor
+  //call NewRange() which gets the address of the anchor and the distance to said anchor  
   //create variables for each value, convert to compatible data types and send to "Topic" which can be assigned any string topic name
-  String Fall = String(RandomFall);
-  client.publish(T_Fall_Detected, Fall.c_str());
+  
+ 
+
+  /*
   String HR = String(RandomHR);
   client.publish(T_Heartrate, HR.c_str());
-  //String esp32MAC = string(TAG_ADDR);
-  //client.publish(T_FD_Tag_MAC_Address, esp32MAC.c_str());
-  //client.publish(T_HR_Tag_MAC_Address, esp32MAC.c_str());
+  String esp32MAC = string(TAG_ADDR);
+  client.publish(T_FD_Tag_MAC_Address, esp32MAC.c_str());
+  client.publish(T_HR_Tag_MAC_Address, esp32MAC.c_str());
   String MotionID = String(RandomMotionID);
   client.publish(T_HR_Motion_ID, MotionID.c_str());
   String FallID = String(RandomFallID);
@@ -651,17 +597,17 @@ void MQTT_upload()
   String OrientationID = String(RandomOrientationID);
   client.publish(T_FD_Orientation_ID, OrientationID.c_str());
 
-  //client.publish(T_Tag_MAC_Address,esp32MAC.c_str());
+  client.publish(T_Tag_MAC_Address,esp32MAC.c_str());
   client.publish(T_Tag_Anchor_MAC_Address1, AnchorMAC1.c_str());
   client.publish(T_TAG_Anchor1_Distance, Distance.c_str());
-  
+  */
 
   
 }
 
 void MAC_Address() 
 {
-  delay(1000);
+  delay(1000); 
   uint8_t mac[6];
   WiFi.macAddress(mac);
 
@@ -706,4 +652,65 @@ void RP_calculate(){
   double z_Buff = float(z);
   roll = atan2(y_Buff , z_Buff) * 57.3;
   pitch = atan2((- x_Buff) , sqrt(y_Buff * y_Buff + z_Buff * z_Buff)) * 57.3;
+}
+
+
+DW1000_Timer()
+{
+  if ((millis() - runtime) > 1000)
+    {
+        display_uwb(uwb_data);
+        runtime = millis();
+    }
+}
+
+Accelerometer_Start()
+{
+  // Make sure both Accelerometers are connected
+    if (!accel1.begin() || !accel2.begin()) 
+    {
+      Serial.println("Ooops, no ADXL345 detected!");
+      while (1);
+    }
+
+    //Set Accelerometer Sensitivity
+    accel1.setRange(ADXL345_RANGE_4_G);
+    accel2.setRange(ADXL345_RANGE_16_G);
+}
+
+Display_Start()
+{
+  // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
+    { // Address 0x3C for 128x32
+        Serial.println(F("SSD1306 allocation failed"));
+        for (;;)
+            ; // Don't proceed, loop forever
+    }
+    display.clearDisplay();
+}
+
+UWB_Initialise()
+{
+    // init the configuration
+    SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);
+    DW1000Ranging.initCommunication(UWB_RST, UWB_SS, UWB_IRQ); // Reset, CS, IRQ pin
+    // define the sketch as anchor. It will be great to dynamically change the type of module
+    DW1000Ranging.attachNewRange(newRange);
+    DW1000Ranging.attachNewDevice(newDevice);
+    DW1000Ranging.attachInactiveDevice(inactiveDevice);
+    // Enable the filter to smooth the distance
+    //DW1000Ranging.useRangeFilter(false);
+
+    // we start the module as a tag
+    DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_RANGE_LOWPOWER);
+    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_SHORTDATA_FAST_LOWPOWER);
+    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_FAST_LOWPOWER);
+    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_SHORTDATA_FAST_ACCURACY);
+    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_FAST_ACCURACY);
+    // DW1000Ranging.startAsTag(TAG_ADDR, DW1000.MODE_LONGDATA_RANGE_ACCURACY);
+
+
+    
+    uwb_data = init_link();
 }
