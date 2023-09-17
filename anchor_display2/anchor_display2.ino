@@ -47,7 +47,7 @@ const int mqtt_port = 1883;
 const char* mqtt_topic = "Distance";
 
 //Antenna Delay
-uint16_t Antennadelay = 16550; //ns (nanoseconds)
+uint16_t Antennadelay = 16600; //ns (nanoseconds)
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -64,12 +64,12 @@ void setup()
     UWB_Anchor_Setup();
     
     WIFI_Setup();
-    MQTT_Setup();        
+    MQTT_Setup();
 }
 
 void loop()
 {
-    DW1000Ranging.loop();        
+    DW1000Ranging.loop();    
 }
 
 void newRange()
@@ -91,19 +91,15 @@ void newRange()
 
 void newBlink(DW1000Device *device)
 {
-   
-     Serial.print("blink; 1 device added ! -> ");
-     Serial.print(" short:");
-     Serial.println(device->getShortAddress(), HEX);
-    
+    Serial.print("blink; 1 device added ! -> ");
+    Serial.print(" short:");
+    Serial.println(device->getShortAddress(), HEX);
 }
 
 void inactiveDevice(DW1000Device *device)
 {
-  
     Serial.print("delete inactive device: ");
     Serial.println(device->getShortAddress(), HEX);
-  
 }
 
 void logoshow(void)
@@ -122,7 +118,7 @@ void logoshow(void)
     display.display();
 }
 
-void MAC_Address()
+void MAC_Address(void)
 {
   delay(1000);
   uint8_t mac[6];
