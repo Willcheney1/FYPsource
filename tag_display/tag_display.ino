@@ -88,11 +88,13 @@ Adafruit_ADXL345_Unified accel2 = Adafruit_ADXL345_Unified(0x1D); // Sensor with
 
 
 //WiFi Login Variables
-const char* ssid = "TP-Link_E1EF";
-const char* password = "golfcdf76r";
+//const char* ssid = "TP-Link_E1EF";
+//const char* password = "golfcdf76r";
+const char* ssid = "WillsiPhone";
+const char* password = "will1234";
 
 //MQTT Connection Variables
-const char* mqtt_server = "192.168.0.107";
+const char* mqtt_server = "172.20.10.2";
 const int mqtt_port = 1883;
 
 //Accelerometer Event Assignment
@@ -190,7 +192,7 @@ void setup()
 void loop()
 { 
     DW1000Ranging.loop();
-    DW1000_Timer()
+    DW1000_Timer();
     Fall_Sampler();
     HR_Sampler();  
 }
@@ -440,9 +442,7 @@ void Wifi_Connect()
   //WiFi.begin(ssid, password)
    WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED){
-      delay(1000);
-      Serial.println("connecting to wifi");
-      Serial.println(WiFi.status());
+
     }
     Serial.println("connected to wifi"); 
   
@@ -619,8 +619,9 @@ void MAC_Address()
 }
 
 
-
-void writeTo(int device, byte address, byte val) {
+/*
+void writeTo(int device, byte address, byte val) 
+{
   Wire.beginTransmission(device); //start transmission to device
   Wire.write(address);        // send register address
   Wire.write(val);        // send value to write
@@ -645,17 +646,17 @@ void readFrom(int device, byte address, int num, byte buff[]) {
   Wire.endTransmission(); //end transmission
 }
 
-//calculate the Roll&Pitch
+calculate the Roll&Pitch
 void RP_calculate(){
   double x_Buff = float(x);
   double y_Buff = float(y);
   double z_Buff = float(z);
   roll = atan2(y_Buff , z_Buff) * 57.3;
   pitch = atan2((- x_Buff) , sqrt(y_Buff * y_Buff + z_Buff * z_Buff)) * 57.3;
-}
+}*/
 
 
-DW1000_Timer()
+void DW1000_Timer()
 {
   if ((millis() - runtime) > 1000)
     {
@@ -664,7 +665,7 @@ DW1000_Timer()
     }
 }
 
-Accelerometer_Start()
+void Accelerometer_Start()
 {
   // Make sure both Accelerometers are connected
     if (!accel1.begin() || !accel2.begin()) 
@@ -678,7 +679,7 @@ Accelerometer_Start()
     accel2.setRange(ADXL345_RANGE_16_G);
 }
 
-Display_Start()
+void Display_Start()
 {
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
     if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C))
@@ -690,7 +691,7 @@ Display_Start()
     display.clearDisplay();
 }
 
-UWB_Initialise()
+void UWB_Initialise()
 {
     // init the configuration
     SPI.begin(SPI_SCK, SPI_MISO, SPI_MOSI);

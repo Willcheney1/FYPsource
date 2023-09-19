@@ -40,9 +40,11 @@ char ANCHOR_ADD[18];
 
 Adafruit_SSD1306 display(128, 64, &Wire, -1);
 
-char* ssid = "TP-Link_E1EF";
-const char* password = "golfcdf76r";
-const char* mqtt_server = "192.168.0.107";
+//char* ssid = "TP-Link_E1EF";
+const char* ssid = "WillsiPhone";
+//const char* password = "golfcdf76r";
+const char* password = "will1234";
+const char* mqtt_server = "172.20.10.2";
 const int mqtt_port = 1883;
 const char* mqtt_topic = "Distance";
 
@@ -167,7 +169,7 @@ void WIFI_Setup()
   WiFi.begin(ssid , password);
   while (WiFi.status() != WL_CONNECTED)
   {
-    delay(1000);
+    delay(5000);
     Serial.println("connecting to wifi");
   }
   Serial.println("connected to wifi");
