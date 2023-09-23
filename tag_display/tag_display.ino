@@ -26,7 +26,7 @@
 #include <PubSubClient.h>
 
 #include <SPI.h>
-
+#include <DFRobot_ADXL345.h>
 #include <DFRobot_Heartrate.h>
 #include <Wire.h>
 #include <Adafruit_GFX.h>
@@ -85,7 +85,8 @@ Adafruit_SSD1306 display(128, 64, &Wire, -1);
 //0x1D for SDO connected to VCC
 Adafruit_ADXL345_Unified accel1 = Adafruit_ADXL345_Unified(0x53); // Sensor with address 0x53
 Adafruit_ADXL345_Unified accel2 = Adafruit_ADXL345_Unified(0x1D); // Sensor with address 0x1D
-
+DFRobot_ADXL345_I2C ADXL1(&Wire,0x53);
+DFRobot_ADXL345_I2C ADXL2(&Wire,0x1D);
 
 //WiFi Login Variables
 //const char* ssid = "TP-Link_E1EF";
@@ -109,6 +110,9 @@ float Moderatethreshold1;
 float Moderatethreshold2;
 float Vigorousthreshold1;
 float Vigorousthreshold2;
+float Running_Threshold = 10;
+float Walking_Threshold = 2.5;
+float Still_Threshold = 0.5;
 
 //Change in Accelerometer Values (Delta)
 float deltaX1;
@@ -119,12 +123,35 @@ float deltaX2;
 float deltaY2;
 float deltaZ2;
 
+float deltaPitch1;
+float deltaRoll1;
+float deltaPitch2;
+float deltaRoll2;
+
+float InitialPitch1;
+float InitialRoll1;
+float InitialPitch2;
+float InitialRoll2;
+
+float CurrentRoll1;
+float CurrentPitch1;
+float CurrentRoll2;
+float CurrentPitch2;
+
+
 int count1 = 0; // Counter for sensor 1 events
 int count2 = 0; // Counter for sensor 2 events
+
+// Calculate sensor statuses
+int Movement_Status1 = 0;
+int Movement_Status2 = 0;
 
 //Delay Replacement
 unsigned long previousMillis = 0;
 const unsigned long interval = 1000; // Interval in milliseconds
+
+unsigned long startFallDetection = 0; // Variable to store the start time
+unsigned long FallDetectionduration = 15000; // 15 seconds in milliseconds
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -167,12 +194,18 @@ float DistanceValue;
 String Distance;
 String AnchorMAC1;
 long int runtime = 0;
+int accval1[3];
+int accval2[3];
 
 void setup()
 {
     Wire.begin(I2C_SDA, I2C_SCL);
+    ADXL1.begin();
+    ADXL1.powerOn();
+    ADXL2.begin();
+    ADXL2.powerOn();
     Serial.println("Wire Begin");
-
+    
     Serial.begin(115200);
     //Serial.begin(9600);
     
@@ -184,7 +217,8 @@ void setup()
     UWB_Initialise();
 
     Wifi_Connect();
-    MQTT_Connect();     
+    MQTT_Connect();
+    InitialiseADXL();    
 }
 
 
@@ -195,6 +229,8 @@ void loop()
     DW1000_Timer();
     Fall_Sampler();
     HR_Sampler();  
+    Movement_Status();
+    fall_detected(); 
 }
 
 void newRange()
@@ -390,7 +426,7 @@ void display_uwb(struct Link *p)
     struct Link *temp = p;
     int row = 0;
 
-    display.clearDisplay();
+    //display.clearDisplay();
 
     display.setTextColor(SSD1306_WHITE);
 
@@ -398,7 +434,7 @@ void display_uwb(struct Link *p)
     {
         display.setTextSize(2);
         display.setCursor(0, 0);
-        display.println("No Anchor");
+        //display.println("No Anchor");
         display.display();
         return;
     }
@@ -442,7 +478,6 @@ void Wifi_Connect()
   //WiFi.begin(ssid, password)
    WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED){
-
     }
     Serial.println("connected to wifi"); 
   
@@ -488,68 +523,245 @@ void Fall_Sampler()
     //Read data from the second sensor 
     sensors_event_t event2;
     accel2.getEvent(&event2);
-
-    //Print X,Y,Z values
-    count1++;
-    Serial.print("Event Count: ");
-    Serial.print(count1);
-    Serial.print(" X: "); Serial.print(event1.acceleration.x); Serial.print("  ");
-    Serial.print("Y: "); Serial.print(event1.acceleration.y); Serial.print("  ");
-    Serial.print("Z: "); Serial.print(event1.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
-    count2++;
-    Serial.print("Event Count: ");
-    Serial.print(count2);
-    Serial.print(" X: "); Serial.print(event2.acceleration.x); Serial.print("  ");
-    Serial.print("Y: "); Serial.print(event2.acceleration.y); Serial.print("  ");
-    Serial.print("Z: "); Serial.print(event2.acceleration.z); Serial.print("  ");Serial.println("m/s^2 ");
   
+    
+    
+    display.clearDisplay();
+  
+    deltaX1 = event1.acceleration.x - prevEvent1.acceleration.x;
+    deltaY1 = event1.acceleration.y - prevEvent1.acceleration.y;
+    deltaZ1 = event1.acceleration.z - prevEvent1.acceleration.z;
+    
+    deltaX2 = event2.acceleration.x - prevEvent2.acceleration.x;
+    deltaY2 = event2.acceleration.y - prevEvent2.acceleration.y;
+    deltaZ2 = event2.acceleration.z - prevEvent2.acceleration.z;
+    
+    // Calculate absolute values
+    int absDeltaX1 = abs(deltaX1);
+    int absDeltaY1 = abs(deltaY1);
+    int absDeltaZ1 = abs(deltaZ1);
+    
+    int absDeltaX2 = abs(deltaX2);
+    int absDeltaY2 = abs(deltaY2);
+    int absDeltaZ2 = abs(deltaZ2);
+    
+    // Store the current readings as previous for the next iteration
+    prevEvent1 = event1;
+    prevEvent2 = event2;
+    
+//Publish both accelerometer X, Y, Z values to MQTT Server
     String event1x = String(event1.acceleration.x);
     client.publish(T_Event1_X, event1x.c_str());
     String event1y = String(event1.acceleration.y);
     client.publish(T_Event1_Y, event1y.c_str());
     String event1z = String(event1.acceleration.z);
     client.publish(T_Event1_Z, event1z.c_str());
-  
+    
     String event2x = String(event2.acceleration.x);
     client.publish(T_Event2_X, event2x.c_str());
     String event2y = String(event2.acceleration.y);
     client.publish(T_Event2_Y, event2y.c_str());
     String event2z = String(event2.acceleration.z);
     client.publish(T_Event2_Z, event2z.c_str());
-    /*Calculate the difference in accelerometer values
-    deltaX1 = event1.acceleration.x - prevEvent1.acceleration.x;
-    deltaY1 = event1.acceleration.y - prevEvent1.acceleration.y;
-    deltaZ1 = event1.acceleration.z - prevEvent1.acceleration.z;
-  
-    deltaX2 = event2.acceleration.x - prevEvent2.acceleration.x;
-    deltaY2 = event2.acceleration.y - prevEvent2.acceleration.y;
-    deltaZ2 = event2.acceleration.z - prevEvent2.acceleration.z;
-  
-    //Store the current readings as previous for the next iteration
-    prevEvent1 = event1;
-    prevEvent2 = event2;
-  
-    //Check if the deltas exceed the thresholds
-    if (abs(deltaX1) > threshold1 || abs(deltaY1) > threshold1 || abs(deltaZ1) > threshold1) 
+
+    if (absDeltaX1 > Running_Threshold || absDeltaY1 > Running_Threshold || absDeltaZ1 > Running_Threshold) 
     {
-      Serial.println("Sensor 1 - Activity detected!");
+      Movement_Status1 = 3;
     }
-    if (abs(deltaX2) > threshold2 || abs(deltaY2) > threshold2 || abs(deltaZ2) > threshold2) 
+    else if (absDeltaX1 > Walking_Threshold || absDeltaY1 > Walking_Threshold || absDeltaZ1 > Walking_Threshold) 
     {
-      Serial.println("Sensor 2 - Activity detected!");
-    }*/
+      Movement_Status1 = 2;
+    }
+    else if (absDeltaX1 > Still_Threshold || absDeltaY1 > Still_Threshold || absDeltaZ1 > Still_Threshold) 
+    {
+      Movement_Status1 = 1;
+    }
+    else if (absDeltaX1 < Still_Threshold || absDeltaY1 < Still_Threshold || absDeltaZ1 < Still_Threshold) 
+    {
+      Movement_Status1 = 4;
+    }
+    
+    if (absDeltaX2 > Running_Threshold || absDeltaY2 > Running_Threshold || absDeltaZ2 > Running_Threshold) 
+    {
+      Movement_Status2 = 3;
+    }
+    else if (absDeltaX2 > Walking_Threshold || absDeltaY2 > Walking_Threshold || absDeltaZ2 > Walking_Threshold) 
+    {
+      Movement_Status2 = 2;
+    }
+    else if (absDeltaX2 > Still_Threshold || absDeltaY2 > Still_Threshold || absDeltaZ2 > Still_Threshold) 
+    {
+      Movement_Status2 = 1;
+    }
+    else if (absDeltaX2 < Still_Threshold || absDeltaY2 < Still_Threshold || absDeltaZ2 < Still_Threshold) 
+    {
+      Movement_Status2 = 4;
+    }
+    
+    // Use the sensor statuses in the switch statements
+   
+      
+      /*Calculate the difference in accelerometer values
+      deltaX1 = event1.acceleration.x - prevEvent1.acceleration.x;
+      deltaY1 = event1.acceleration.y - prevEvent1.acceleration.y;
+      deltaZ1 = event1.acceleration.z - prevEvent1.acceleration.z;
+    
+      deltaX2 = event2.acceleration.x - prevEvent2.acceleration.x;
+      deltaY2 = event2.acceleration.y - prevEvent2.acceleration.y;
+      deltaZ2 = event2.acceleration.z - prevEvent2.acceleration.z;
+    
+      //Store the current readings as previous for the next iteration
+      prevEvent1 = event1;
+      prevEvent2 = event2;
+    
+      //Check if the deltas exceed the thresholds
+      if (abs(deltaX1) > threshold1 || abs(deltaY1) > threshold1 || abs(deltaZ1) > threshold1) 
+      {
+        Serial.println("Sensor 1 - Activity detected!");
+      }
+      if (abs(deltaX2) > threshold2 || abs(deltaY2) > threshold2 || abs(deltaZ2) > threshold2) 
+      {
+        Serial.println("Sensor 2 - Activity detected!");
+      }*/
   }
 }
 
 
-void Fall_Detected()
+void InitialiseADXL()
 {
-  if (RandomFall > 500)
+    ADXL1.readAccel(accval1);
+    ADXL2.readAccel(accval2);
+    
+    ADXL1.RPCalculate(accval1);
+    Serial.print("Roll1:"); Serial.println( ADXL1.RP.roll );
+    Serial.print("Pitch1:"); Serial.println( ADXL1.RP.pitch );
+    InitialRoll1 = ADXL1.RP.roll;
+    InitialPitch1 = ADXL1.RP.pitch;
+    ADXL2.RPCalculate(accval2);
+    Serial.print("Roll2:"); Serial.println( ADXL2.RP.roll );
+    Serial.print("Pitch2:"); Serial.println( ADXL2.RP.pitch );
+    InitialRoll1 = ADXL2.RP.roll;
+    InitialPitch1 = ADXL2.RP.pitch;
+}
+
+void Movement_Status()
+{
+   switch (Movement_Status1) 
+    {
+      case 1:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Walking Detected");
+        display.display();
+      case 2:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Running Detected");
+        display.display();
+        break;
+      case 3:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Fall Detected");
+        display.display();
+        break;
+      case 4:
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 0);
+        display.println("Still Detected");
+        display.display();
+        break;
+    }
+    
+    switch (Movement_Status2) 
+    {
+      case 1:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 20);
+        display.println("Walking Detected");
+        display.display();
+        break;
+      case 2:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 20);
+        display.println("Running Detected");
+        display.display();
+        break;
+      case 3:
+        
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 20);
+        display.println("Fall Detected");
+        display.display();
+        break;
+      case 4:
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 20);
+        display.println("Still Detected");
+        display.display();
+        break;
+    }
+}
+
+void (fall_detected)
+{
+  if (Movement_Status1 || Movement_Status2 == 3)
   {
-    MQTT_upload();
+    unsigned long currentTime = millis();
+
+    if (startFallDetection == 0)
+    {
+      startFallDetection = currentTime;
+    }
+    
+    unsigned long elapsedTime = currentTime - startFallDetection;
+
+    if (elapsedTime < FallDetectionduration)
+    {
+      //real current roll and pitch and compare to initial roll and pitch
+      ADXL1.readAccel(accval1);
+      ADXL2.readAccel(accval2);
+      
+      ADXL1.RPCalculate(accval1);
+      ADXL2.RPCalculate(accval2);
+  
+      CurrentRoll1 = ADXL1.RP.roll;
+      CurrentPitch1 = ADXL1.RP.pitch;
+      CurrentRoll2 = ADXL2.RP.roll;
+      CurrentPitch2 = ADXL2.RP.pitch;
+  
+      deltaRoll1 = abs(currentRoll1 - initialRoll1);
+      deltaRoll2 = abs(currentRoll2 - initialRoll2);
+      deltaPitch1 = abs(currentPitch1 - initialPitch1);
+      deltaPitch2 = abs(currentPitch2 - initialPitch2);
+  
+      if (deltaRoll1 > 10 || deltaRoll2 > 10 || deltaPitch1 > 10 || deltaPitch2 > 10)
+      {
+        display.setTextColor(SSD1306_WHITE);
+        display.setTextSize(1);
+        display.setCursor(0, 30);
+        display.println("Not Upright");
+        display.display();
+      }
+    }
+    else
+    {
+      startFallDetection = 0;
+    }
   }
-  else
-  RandomFall = 500;  
 }
 
 
