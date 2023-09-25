@@ -151,7 +151,7 @@ unsigned long previousMillis = 0;
 const unsigned long interval = 1000; // Interval in milliseconds
 
 unsigned long startFallDetection = 0; // Variable to store the start time
-unsigned long FallDetectionduration = 15000; // 15 seconds in milliseconds
+unsigned long FallDetectionduration = 60000; // 60 seconds in milliseconds
 
 WiFiClient espClient;
 PubSubClient client(espClient);
@@ -564,40 +564,11 @@ void Fall_Sampler()
     String event2z = String(event2.acceleration.z);
     client.publish(T_Event2_Z, event2z.c_str());
 
-    if (absDeltaX1 > Running_Threshold || absDeltaY1 > Running_Threshold || absDeltaZ1 > Running_Threshold) 
+    if (absDeltaX1 > Running_Threshold || absDeltaY1 > Running_Threshold || absDeltaZ1 > Running_Threshold || absDeltaX2 > Running_Threshold || absDeltaY2 > Running_Threshold || absDeltaZ2 > Running_Threshold) 
     {
       Movement_Status1 = 3;
     }
-    else if (absDeltaX1 > Walking_Threshold || absDeltaY1 > Walking_Threshold || absDeltaZ1 > Walking_Threshold) 
-    {
-      Movement_Status1 = 2;
-    }
-    else if (absDeltaX1 > Still_Threshold || absDeltaY1 > Still_Threshold || absDeltaZ1 > Still_Threshold) 
-    {
-      Movement_Status1 = 1;
-    }
-    else if (absDeltaX1 < Still_Threshold || absDeltaY1 < Still_Threshold || absDeltaZ1 < Still_Threshold) 
-    {
-      Movement_Status1 = 4;
-    }
-    
-    if (absDeltaX2 > Running_Threshold || absDeltaY2 > Running_Threshold || absDeltaZ2 > Running_Threshold) 
-    {
-      Movement_Status2 = 3;
-    }
-    else if (absDeltaX2 > Walking_Threshold || absDeltaY2 > Walking_Threshold || absDeltaZ2 > Walking_Threshold) 
-    {
-      Movement_Status2 = 2;
-    }
-    else if (absDeltaX2 > Still_Threshold || absDeltaY2 > Still_Threshold || absDeltaZ2 > Still_Threshold) 
-    {
-      Movement_Status2 = 1;
-    }
-    else if (absDeltaX2 < Still_Threshold || absDeltaY2 < Still_Threshold || absDeltaZ2 < Still_Threshold) 
-    {
-      Movement_Status2 = 4;
-    }
-    
+       
     // Use the sensor statuses in the switch statements
    
       
@@ -629,23 +600,26 @@ void Fall_Sampler()
 
 void InitialiseADXL()
 {
-    ADXL1.readAccel(accval1);
-    ADXL2.readAccel(accval2);
-    
-    ADXL1.RPCalculate(accval1);
-    Serial.print("Roll1:"); Serial.println( ADXL1.RP.roll );
-    Serial.print("Pitch1:"); Serial.println( ADXL1.RP.pitch );
-    InitialRoll1 = ADXL1.RP.roll;
-    InitialPitch1 = ADXL1.RP.pitch;
-    ADXL2.RPCalculate(accval2);
-    Serial.print("Roll2:"); Serial.println( ADXL2.RP.roll );
-    Serial.print("Pitch2:"); Serial.println( ADXL2.RP.pitch );
-    InitialRoll1 = ADXL2.RP.roll;
-    InitialPitch1 = ADXL2.RP.pitch;
+  //using DFRobot library get ADXL values and use them to determine the pitch and roll of the ADXLs.
+  
+  ADXL1.readAccel(accval1);
+  ADXL2.readAccel(accval2);
+  
+  ADXL1.RPCalculate(accval1);
+  Serial.print("Roll1:"); Serial.println( ADXL1.RP.roll );
+  Serial.print("Pitch1:"); Serial.println( ADXL1.RP.pitch );
+  InitialRoll1 = ADXL1.RP.roll;
+  InitialPitch1 = ADXL1.RP.pitch;
+  ADXL2.RPCalculate(accval2);
+  Serial.print("Roll2:"); Serial.println( ADXL2.RP.roll );
+  Serial.print("Pitch2:"); Serial.println( ADXL2.RP.pitch );
+  InitialRoll1 = ADXL2.RP.roll;
+  InitialPitch1 = ADXL2.RP.pitch;
 }
 
 void Movement_Status()
 {
+  //Function to determine the user's activity level from the ADXLs 
    switch (Movement_Status1) 
     {
       case 1:
@@ -718,6 +692,8 @@ void Movement_Status()
 
 void (fall_detected)
 {
+
+  //Once a fall has occurred monitor the data received from ADXLs to determine orientation and activity level
   if (Movement_Status1 || Movement_Status2 == 3)
   {
     unsigned long currentTime = millis();
@@ -756,6 +732,21 @@ void (fall_detected)
         display.println("Not Upright");
         display.display();
       }
+
+      if (absDeltaX1 > Walking_Threshold || absDeltaY1 > Walking_Threshold || absDeltaZ1 > Walking_Threshold || absDeltaX2 > Walking_Threshold || absDeltaY2 > Walking_Threshold || absDeltaZ2 > Walking_Threshold) 
+      {
+        Movement_Status1 = 2;
+      }
+      else if (absDeltaX1 > Still_Threshold || absDeltaY1 > Still_Threshold || absDeltaZ1 > Still_Threshold || absDeltaX2 > Still_Threshold || absDeltaY2 > Still_Threshold || absDeltaZ2 > Still_Threshold) 
+      {
+        Movement_Status1 = 1;
+      }
+      else if (absDeltaX1 < Still_Threshold || absDeltaY1 < Still_Threshold || absDeltaZ1 < Still_Threshold || absDeltaX2 < Still_Threshold || absDeltaY2 < Still_Threshold || absDeltaZ2 < Still_Threshold) 
+      {
+        Movement_Status1 = 4;
+      }
+     
+      
     }
     else
     {
