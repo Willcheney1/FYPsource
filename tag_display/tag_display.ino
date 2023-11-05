@@ -1,6 +1,7 @@
 /*Will Cheney Tag Display*/
 
 
+
 #include <DW1000.h>
 #include <DW1000CompileOptions.h>
 #include <DW1000Constants.h>
@@ -128,16 +129,28 @@ float deltaRoll1;
 float deltaPitch2;
 float deltaRoll2;
 
-float InitialPitch1;
-float InitialRoll1;
-float InitialPitch2;
-float InitialRoll2;
+float initialPitch1;
+float initialRoll1;
+float initialPitch2;
+float initialRoll2;
 
-float CurrentRoll1;
-float CurrentPitch1;
-float CurrentRoll2;
-float CurrentPitch2;
+float currentRoll1;
+float currentPitch1;
+float currentRoll2;
+float currentPitch2;
 
+int absDeltaX1;
+int absDeltaY1;
+int absDeltaZ1;
+
+int absDeltaX2;
+int absDeltaY2;
+int absDeltaZ2;
+
+float absDeltaRoll1;
+float absDeltaRoll2;
+float absDeltaPitch1;
+float absDeltaPitch2;
 
 int count1 = 0; // Counter for sensor 1 events
 int count2 = 0; // Counter for sensor 2 events
@@ -150,13 +163,22 @@ int Movement_Status2 = 0;
 unsigned long previousMillis = 0;
 const unsigned long interval = 1000; // Interval in milliseconds
 
+int lifeCounter = 1;
+unsigned long previousTime = 0;
+const unsigned long loopEnd = 1000; // 1 second loop
+
+
 unsigned long startFallDetection = 0; // Variable to store the start time
 unsigned long FallDetectionduration = 60000; // 60 seconds in milliseconds
+
+
 
 WiFiClient espClient;
 PubSubClient client(espClient);
 
 //topics
+
+const char* T_LifeCount = "Tag_MAC_Address/LifeCount";
 
 const char* T_Event1_X = "ADXL1/Event1_X";
 const char* T_Event1_Y = "ADXL1/Event1_Y";
@@ -190,15 +212,27 @@ int RandomMotionID;
 int RandomFallID;
 int RandomOrientationID;
 
+String AnchorMAC1;
+float DistanceValue1;
+String Distance1;
+
+String AnchorMAC2;
+float DistanceValue2;
+String Distance2;
+
 float DistanceValue;
 String Distance;
-String AnchorMAC1;
+
 long int runtime = 0;
 int accval1[3];
 int accval2[3];
 
+
+
 void setup()
 {
+    
+    
     Wire.begin(I2C_SDA, I2C_SCL);
     ADXL1.begin();
     ADXL1.powerOn();
@@ -215,22 +249,30 @@ void setup()
     Display_Start();
     logoshow();
     UWB_Initialise();
-
+    InitialisePitchRoll();
     Wifi_Connect();
     MQTT_Connect();
-    InitialiseADXL();    
+    InitialiseADXL(); 
+    
+    
 }
 
 
 
 void loop()
 { 
+    
+    
+    LifeCycle();
     DW1000Ranging.loop();
     DW1000_Timer();
     Fall_Sampler();
     HR_Sampler();  
-    Movement_Status();
-    fall_detected(); 
+    Movement_Status();    
+    fall_detected();
+    newRange();
+    //Location_Monitoring();
+    
 }
 
 void newRange()
@@ -537,13 +579,13 @@ void Fall_Sampler()
     deltaZ2 = event2.acceleration.z - prevEvent2.acceleration.z;
     
     // Calculate absolute values
-    int absDeltaX1 = abs(deltaX1);
-    int absDeltaY1 = abs(deltaY1);
-    int absDeltaZ1 = abs(deltaZ1);
+    absDeltaX1 = abs(deltaX1);
+    absDeltaY1 = abs(deltaY1);
+    absDeltaZ1 = abs(deltaZ1);
     
-    int absDeltaX2 = abs(deltaX2);
-    int absDeltaY2 = abs(deltaY2);
-    int absDeltaZ2 = abs(deltaZ2);
+    absDeltaX2 = abs(deltaX2);
+    absDeltaY2 = abs(deltaY2);
+    absDeltaZ2 = abs(deltaZ2);
     
     // Store the current readings as previous for the next iteration
     prevEvent1 = event1;
@@ -597,7 +639,52 @@ void Fall_Sampler()
   }
 }
 
+void LifeCycle()
+{
 
+  //Counter to ensure the system's operation
+  //Counts to 99 and then restarts
+  //Count passes through the entire system
+unsigned long lifeTime = millis();
+  
+
+  if (lifeTime - previousTime >= loopEnd){
+    
+    previousTime = lifeTime;
+    String LifeCount = String(lifeCounter);
+    client.publish(T_LifeCount, LifeCount.c_str());
+    Serial.print("LifeCount: ");
+    Serial.println(lifeCounter);
+    lifeCounter++;
+    if (lifeCounter > 99){  
+      lifeCounter = 1;     
+    }
+  }
+}
+
+void InitialisePitchRoll()
+{
+
+  //calculate and read the pitch and roll values from both accelerometers after 10 seconds 
+  //Personnel should be standing to achieve a baseline for pitch and roll
+
+    
+  unsigned long currentTime = millis();
+  unsigned long waitTime = 10000; //wait 10 seconds before taking  a reading
+
+  if (currentTime >= waitTime){
+    
+    ADXL1.readAccel(accval1);  
+    ADXL1.RPCalculate(accval1);
+    initialRoll1 = ADXL1.RP.roll;
+    initialPitch1 = ADXL1.RP.pitch;
+
+    ADXL2.readAccel(accval2);
+    ADXL2.RPCalculate(accval2);
+    initialRoll2 = ADXL2.RP.roll;
+    initialPitch2 = ADXL2.RP.pitch;
+  }
+}
 void InitialiseADXL()
 {
   //using DFRobot library get ADXL values and use them to determine the pitch and roll of the ADXLs.
@@ -608,13 +695,13 @@ void InitialiseADXL()
   ADXL1.RPCalculate(accval1);
   Serial.print("Roll1:"); Serial.println( ADXL1.RP.roll );
   Serial.print("Pitch1:"); Serial.println( ADXL1.RP.pitch );
-  InitialRoll1 = ADXL1.RP.roll;
-  InitialPitch1 = ADXL1.RP.pitch;
+  initialRoll1 = ADXL1.RP.roll;
+  initialPitch1 = ADXL1.RP.pitch;
   ADXL2.RPCalculate(accval2);
   Serial.print("Roll2:"); Serial.println( ADXL2.RP.roll );
   Serial.print("Pitch2:"); Serial.println( ADXL2.RP.pitch );
-  InitialRoll1 = ADXL2.RP.roll;
-  InitialPitch1 = ADXL2.RP.pitch;
+  initialRoll1 = ADXL2.RP.roll;
+  initialPitch1 = ADXL2.RP.pitch;
 }
 
 void Movement_Status()
@@ -690,21 +777,25 @@ void Movement_Status()
     }
 }
 
-void (fall_detected)
+void fall_detected()
 {
 
   //Once a fall has occurred monitor the data received from ADXLs to determine orientation and activity level
-  if (Movement_Status1 || Movement_Status2 == 3)
+unsigned long fallTime = millis();
+ 
+
+  
+  if (Movement_Status1 || Movement_Status2 == 3) //Switch statement Fall Detected
   {
-    unsigned long currentTime = millis();
 
     if (startFallDetection == 0)
     {
-      startFallDetection = currentTime;
+      startFallDetection = fallTime;
     }
     
-    unsigned long elapsedTime = currentTime - startFallDetection;
+    unsigned long elapsedTime = fallTime - startFallDetection;
 
+    //establish a 10 second timer
     if (elapsedTime < FallDetectionduration)
     {
       //real current roll and pitch and compare to initial roll and pitch
@@ -714,43 +805,32 @@ void (fall_detected)
       ADXL1.RPCalculate(accval1);
       ADXL2.RPCalculate(accval2);
   
-      CurrentRoll1 = ADXL1.RP.roll;
-      CurrentPitch1 = ADXL1.RP.pitch;
-      CurrentRoll2 = ADXL2.RP.roll;
-      CurrentPitch2 = ADXL2.RP.pitch;
-  
-      deltaRoll1 = abs(currentRoll1 - initialRoll1);
-      deltaRoll2 = abs(currentRoll2 - initialRoll2);
-      deltaPitch1 = abs(currentPitch1 - initialPitch1);
-      deltaPitch2 = abs(currentPitch2 - initialPitch2);
-  
-      if (deltaRoll1 > 10 || deltaRoll2 > 10 || deltaPitch1 > 10 || deltaPitch2 > 10)
-      {
-        display.setTextColor(SSD1306_WHITE);
-        display.setTextSize(1);
-        display.setCursor(0, 30);
-        display.println("Not Upright");
-        display.display();
-      }
-
-      if (absDeltaX1 > Walking_Threshold || absDeltaY1 > Walking_Threshold || absDeltaZ1 > Walking_Threshold || absDeltaX2 > Walking_Threshold || absDeltaY2 > Walking_Threshold || absDeltaZ2 > Walking_Threshold) 
-      {
-        Movement_Status1 = 2;
-      }
-      else if (absDeltaX1 > Still_Threshold || absDeltaY1 > Still_Threshold || absDeltaZ1 > Still_Threshold || absDeltaX2 > Still_Threshold || absDeltaY2 > Still_Threshold || absDeltaZ2 > Still_Threshold) 
-      {
-        Movement_Status1 = 1;
-      }
-      else if (absDeltaX1 < Still_Threshold || absDeltaY1 < Still_Threshold || absDeltaZ1 < Still_Threshold || absDeltaX2 < Still_Threshold || absDeltaY2 < Still_Threshold || absDeltaZ2 < Still_Threshold) 
-      {
-        Movement_Status1 = 4;
-      }
-     
+      currentRoll1 = ADXL1.RP.roll;
+      currentPitch1 = ADXL1.RP.pitch;
+      currentRoll2 = ADXL2.RP.roll;
+      currentPitch2 = ADXL2.RP.pitch;
       
-    }
+      // Calculate absolute differences for Pitch and Roll compared to an upright position
+      float deltaRoll1 = currentRoll1 - initialRoll1;
+      float deltaRoll2 = currentRoll2 - initialRoll2;
+      float deltaPitch1 = currentPitch1 - initialPitch1;
+      float deltaPitch2 = currentPitch2 - initialPitch2;
+      
+      
+      absDeltaRoll1 = abs(deltaRoll1);
+      absDeltaRoll2 = abs(deltaRoll2);
+      absDeltaPitch1 = abs(deltaPitch1);
+      absDeltaPitch2 = abs(deltaPitch2);
+      //Test to see if the orientation is the same as standing up && test to see if the movement is minimal
+      if ((absDeltaRoll1 >= 10 || absDeltaRoll2 >= 10 || absDeltaPitch1 >= 10 || absDeltaPitch2 >= 10 ) && (absDeltaX1 < Walking_Threshold || absDeltaY1 < Walking_Threshold || absDeltaZ1 < Walking_Threshold || absDeltaX2 < Walking_Threshold || absDeltaY2 < Walking_Threshold || absDeltaZ2 < Walking_Threshold)){
+      //publish fall detected under the MAC Address topic
+      String esp32MAC = String(TAG_ADDR);
+      client.publish(T_FD_Tag_MAC_Address, esp32MAC.c_str());        
+      }
     else
     {
       startFallDetection = 0;
+    }
     }
   }
 }
@@ -767,45 +847,33 @@ void HR_Sampler()
   }*/
 }
 
-
-void HR_Threshold()
+void Location_Monitoring()
 {
-  if (RandomHR > 500)
+
+  
+  
+  AnchorMAC1 = String(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX);
+  DistanceValue1 = DW1000Ranging.getDistantDevice() ->getRange();
+  Distance1 = String(DistanceValue1);
+  Serial.print("from: ");
+  Serial.print(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX);
+  Serial.print("\t Range: ");
+  Serial.print(DW1000Ranging.getDistantDevice()->getRange());
+  Serial.print(" m");
+  Serial.print("\t");
+  
+  if (AnchorMAC1 != String(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX))
   {
-    MQTT_upload();
+    AnchorMAC2 = String(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX);
+    DistanceValue2 = DW1000Ranging.getDistantDevice() ->getRange();
+    Distance2 = String(DistanceValue2);
+    Serial.print("from: ");
+    Serial.print(DW1000Ranging.getDistantDevice()->getShortAddress(), HEX);
+    Serial.print("\t Range: ");
+    Serial.print(DW1000Ranging.getDistantDevice()->getRange());
+    Serial.print(" m");
+    Serial.print("\t");
   }
-  else 
-  RandomHR = 500;
-}
-
-
-void MQTT_upload()
-{
-  //called by Fall_detected()
-  //call NewRange() which gets the address of the anchor and the distance to said anchor  
-  //create variables for each value, convert to compatible data types and send to "Topic" which can be assigned any string topic name
-  
- 
-
-  /*
-  String HR = String(RandomHR);
-  client.publish(T_Heartrate, HR.c_str());
-  String esp32MAC = string(TAG_ADDR);
-  client.publish(T_FD_Tag_MAC_Address, esp32MAC.c_str());
-  client.publish(T_HR_Tag_MAC_Address, esp32MAC.c_str());
-  String MotionID = String(RandomMotionID);
-  client.publish(T_HR_Motion_ID, MotionID.c_str());
-  String FallID = String(RandomFallID);
-  client.publish(T_FD_Fall_ID, FallID.c_str());
-  String OrientationID = String(RandomOrientationID);
-  client.publish(T_FD_Orientation_ID, OrientationID.c_str());
-
-  client.publish(T_Tag_MAC_Address,esp32MAC.c_str());
-  client.publish(T_Tag_Anchor_MAC_Address1, AnchorMAC1.c_str());
-  client.publish(T_TAG_Anchor1_Distance, Distance.c_str());
-  */
-
-  
 }
 
 void MAC_Address() 
